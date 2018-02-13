@@ -1,0 +1,515 @@
+---
+title: "DA5020 - Homework 5: Dates and Times"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  # mute messages output
+  message = FALSE
+)
+
+library(stringr)
+library(lubridate)
+library(tidyverse)
+```
+
+Continue working with Farmers Market data from last week.
+
+This week's assignment is not only about dates and times, but also what you learnt from past weeks: data transformation, strings, and more.
+
+You may also need to go through a review on [R control statesments](http://uc-r.github.io/control_statements) since they will come handy in solving some of the problems.
+```{r}
+Farmers_Market <- read.csv("farmers_market.csv",header=TRUE,stringsAsFactors = FALSE)
+
+```
+## Questions
+
+1. (10 points) Add a new column `Season1Days` that contains the number of days a market is opened per week (for the dates it is open).
+```{r}
+Days_open <- str_extract_all(Farmers_Market$Season1Time,"\\w\\w\\w:") # extract the days from season1 time column
+Farmers_Market$Season1Days <- str_count(Days_open,"\\w\\w\\w:") # count the number of extracting in each row and that gives the number of days a market is open in season 1
+Farmers_Market$Season1Days
+```
+2. (10 points) Add a new column `WeekendOpen` indicating whether a market opens during weekends in `Season1`.
+```{r}
+#create empty column "WeekendOpen"
+Farmers_Market$WeekendOpen <- 0
+Seas1_Days <- grep("Sat|Sun",Farmers_Market$Season1Time,ignore.case = TRUE) # extract the row numbers which have saturday or sunday in it using grep and use those row numbers to indicate whether a market is open on weekends or not.
+Farmers_Market$WeekendOpen[Seas1_Days] <- "Open on Weekends"
+Farmers_Market$WeekendOpen[-Seas1_Days] <- "Closed on Weekends"
+Farmers_Market$WeekendOpen
+```
+
+3. (20 points) Find out which markets close before 6PM, and which open only for fewer than 4 hours a day. For simplicity, consider only `Season1Time`. For markets with different open hours across a week, use the average length of open hours for the days they actually open. 
+```{r}
+Seas1_Time <- str_extract_all(Farmers_Market$Season1Time,"-\\s?\\d+:\\d\\d \\w\\w") #extracting closing time by specifying the digits coming after "-"
+Seas1_Time_ext <- str_extract_all(Seas1_Time,"\\d+:\\d\\d \\w\\w",simplify = TRUE) #removing the '-'
+# converting to 24 hour format
+for (k in 1:ncol(Seas1_Time_ext)) {
+Seas1_Time_ext[,k] <- format(strptime(Seas1_Time_ext[,k], "%I:%M %p"), format="%H:%M:%S")
+}
+# replacing "NA" with empty space
+Seas1_Time_ext <- ifelse (is.na(Seas1_Time_ext),"",Seas1_Time_ext)
+#removing the minutes and seconds part because in order to find if the store closes before 6pm we need to see if the hour part is less than 18 or not
+for (k in 1:ncol(Seas1_Time_ext)) {
+Seas1_Time_ext[,k] <- str_replace_all(Seas1_Time_ext[,k],":\\d\\d:\\d\\d","")
+}
+# creating empty matrix to collect the data. this has more than one column because some of the markets have more than one business hours
+Seas1_Time_close <- matrix( data = NA ,nrow = nrow(Seas1_Time_ext), ncol = ncol(Seas1_Time_ext))
+for (k in 1:ncol(Seas1_Time_ext)) {
+  for ( i in 1:nrow(Seas1_Time_ext)){
+    if(Seas1_Time_ext[i,k] != "" && Seas1_Time_ext[i,k]<18) {
+    Seas1_Time_close[i,k] <- "closes before 6 pm"
+    }
+  }
+}
+
+Seas1_Time_close <- paste(Seas1_Time_close[,1],Seas1_Time_close[,2],Seas1_Time_close[,3],Seas1_Time_close[,4],Seas1_Time_close[,5],Seas1_Time_close[,6],Seas1_Time_close[,7],sep = ",")
+
+Farmers_Market$MarketName[str_which(Seas1_Time_close,"closes before 6 pm")]
+
+# Open less than 4 hrs
+Seas1_Time_2 <- str_extract_all(Farmers_Market$Season1Time,"\\d+:\\d\\d \\w\\w\\s?-\\s?\\d+:\\d\\d \\w\\w",simplify = TRUE) # extracting all the business hours
+# creating empty matrix
+Seas1_openhrs <- matrix( data = NA ,nrow = nrow(Seas1_Time_2), ncol = ncol(Seas1_Time_2))
+# go into each column to work on each business hour duration
+for (c in 1:ncol(Seas1_Time_2)) {
+  Seas1_Time_open <- matrix( data = NA ,nrow = nrow(Seas1_Time_2), ncol = 2)
+  Seas1_Time_open <- str_extract_all(Seas1_Time_2[,c],"\\d+:\\d\\d \\w\\w",simplify = TRUE)
+ # Seas1_Time_open <- format(strptime(Seas1_Time_open, "%I:%M %p"), format="%H:%M:%S")
+  Time1 <- as.POSIXct(format(strptime(Seas1_Time_open[,1],"%I:%M %p"),format="%H:%M:%S"),format = "%H:%M")
+  Time2 <- as.POSIXct(format(strptime(Seas1_Time_open[,2],"%I:%M %p"),format="%H:%M:%S"),format = "%H:%M")
+Seas1_openhrs[,c] <-str_extract(difftime(Time2,Time1,units = "hours"),"\\d+") # calculation the duration of each businees hours for each market
+}
+Seas1_meanopen <- NA
+for ( i in 1:nrow(Seas1_openhrs)) {
+  Seas1_meanopen[i] <- mean(as.numeric(Seas1_openhrs[i,]), na.rm = TRUE) # mean of all the business hours for each market
+}
+Farmers_Market$MarketName[which(Seas1_meanopen < 4)]
+
+
+```
+3. (40 Points) The seasons are not standardized and would make analysis difficult. Create four new columns for four seasons (Spring, Summer, Fall, Winter), indicating whether a market is available in that season. Also, create two additional columns `HalfYear` and `YearRound` to identify those who open across seasons. Define "half year" and "year round" on your own terms, but explain them before you write the code (or as comments in your code). (Hint: you may want to create even more auxiliary columns, `Season1BeginDate` and `Season1EndDate` for example.)
+```{r}
+# get begin and end dates for each season
+Season1 <- separate(Farmers_Market,Season1Date, into = c("BeginDate","EndDate"), sep = " to ")
+Season2 <- separate(Farmers_Market,Season2Date, into = c("BeginDate","EndDate"), sep = " to ")
+Season3 <- separate(Farmers_Market,Season3Date, into = c("BeginDate","EndDate"), sep = " to ")
+Season4 <- separate(Farmers_Market,Season4Date, into = c("BeginDate","EndDate"), sep = " to ")
+
+# function to convert any abbreviated months to numerical months
+dateFun <- function(x, Day = "29", Year = "2016"){
+  #using year 2016 since it is a leap year so 29th can be used for february and any dates with 29th february in the data will be handled without any error
+  x <- ifelse(substr(x, 1, 3) %in% month.abb,
+              paste(match(substr(x, 1, 3), month.abb),
+                    Day,
+                    Year, sep = "/"), x)
+  #return date
+  mdy(x)
+}
+# apply the function to all dates extracted above
+Season1$BeginDate <- lapply(Season1$BeginDate, dateFun)
+Season1$EndDate <- lapply(Season1$EndDate, dateFun)
+Season2$BeginDate <- lapply(Season2$BeginDate, dateFun)
+Season2$EndDate <- lapply(Season2$EndDate, dateFun)
+Season3$BeginDate <- lapply(Season3$BeginDate, dateFun)
+Season3$EndDate <- lapply(Season3$EndDate, dateFun)
+Season4$BeginDate <- lapply(Season4$BeginDate, dateFun)
+Season4$EndDate <- lapply(Season4$EndDate, dateFun)
+
+# function to define the seasons of begin and end dates
+getSeasons <- function(DATES) {
+    WS <- as.Date("2015-12-21", format = "%Y-%m-%d") # Winter Solstice
+    SE <- as.Date("2016-3-20",  format = "%Y-%m-%d") # Spring Equinox
+    SS <- as.Date("2016-6-20",  format = "%Y-%m-%d") # Summer Solstice
+    FE <- as.Date("2016-9-22",  format = "%Y-%m-%d") # Fall Equinox
+
+    # Convert dates from any year to 2016 dates
+    d<- DATES
+    for (i in 1:nrow(Season1)) {
+d[[i]]<-as.Date(strftime(DATES[[i]],format="2016-%m-%d"))
+}
+
+    ifelse (d >= WS & d < SE, "Winter",
+      ifelse (d >= SE & d < SS, "Spring",
+        ifelse (d >= SS & d < FE, "Summer","Fall")))
+}
+# create empty begin and end columns for each season and then apply the function to get the seasons for each market for the begin and end date
+Season1$Begin <- 0
+Season1$End <- 0
+Season2$Begin <- 0
+Season2$End <- 0
+Season3$Begin <- 0
+Season3$End <- 0
+Season4$Begin <- 0
+Season4$End <- 0
+
+Season1$Begin <- getSeasons(Season1$BeginDate)
+Season1$End <- getSeasons(Season1$EndDate)
+Season2$Begin <- getSeasons(Season2$BeginDate)
+Season2$End <- getSeasons(Season2$EndDate)
+Season3$Begin <- getSeasons(Season3$BeginDate)
+Season3$End <- getSeasons(Season3$EndDate)
+Season4$Begin <- getSeasons(Season4$BeginDate)
+Season4$End <- getSeasons(Season4$EndDate)
+# create new column for each season saying unavailable which will be updated later according to the dates the market are open for
+Farmers_Market$Winter <- "Unavailable"
+Farmers_Market$Spring <- "Unavailable"
+Farmers_Market$Summer <- "Unavailable"
+Farmers_Market$Fall <- "Unavailable"
+
+# go through each season begin and end columns and compare the beginning and ending seasons and accordingly assign the availability for each season.
+for (h in 1:nrow(Farmers_Market)) {
+  if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Winter" && !is.na(Season1$End[h]) && Season1$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    }
+    else if ( !is.na(Season1$Begin[h]) && Season1$Begin[h] == "Winter" && !is.na(Season1$End[h]) && Season1$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Winter" && !is.na(Season1$End[h]) && Season1$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Winter" && !is.na(Season1$End[h]) && Season1$End[h] == "Fall") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Spring" && !is.na(Season1$End[h]) && Season1$End[h] == "Spring") {
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Spring" && !is.na(Season1$End[h]) && Season1$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Spring" && !is.na(Season1$End[h]) && Season1$End[h] == "Summer") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Spring" && !is.na(Season1$End[h]) && Season1$End[h] == "Fall") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Summer") {
+    if(!is.na(Season1$End[h]) && Season1$End[h] == "Summer") {
+    Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season1$End[h]) && Season1$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season1$End[h]) && Season1$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+       Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season1$End[h]) && Season1$End[h] == "Fall") {
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+  else if (!is.na(Season1$Begin[h]) && Season1$Begin[h] == "Fall") {
+    if(!is.na(Season1$End[h]) && Season1$End[h] == "Fall") {
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season1$End[h]) && Season1$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season1$End[h]) && Season1$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season1$End[h]) && Season1$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+}
+for (h in 1:nrow(Farmers_Market)) {
+  if (!is.na(Season2$Begin[h]) && Season2$Begin[h] == "Winter") {
+    if(!is.na(Season2$End[h]) && Season2$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Fall") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+  else if (!is.na(Season2$Begin[h]) && Season2$Begin[h] == "Spring") {
+    if(!is.na(Season2$End[h]) && Season2$End[h] == "Spring") {
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+    Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Summer") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Fall") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+  else if (!is.na(Season2$Begin[h]) && Season2$Begin[h] == "Summer") {
+    if(!is.na(Season2$End[h]) && Season2$End[h] == "Summer") {
+    Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+      Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Fall") {
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+  else if (!is.na(Season2$Begin[h]) && Season2$Begin[h] == "Fall") {
+    if(!is.na(Season2$End[h]) && Season2$End[h] == "Fall") {
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season2$End[h]) && Season2$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+}
+for (h in 1:nrow(Farmers_Market)) {
+  if (!is.na(Season3$Begin[h]) && Season3$Begin[h] == "Winter") {
+    if(!is.na(Season3$End[h]) && Season3$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Fall") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+  else if (!is.na(Season3$Begin[h]) && Season3$Begin[h] == "Spring") {
+    if(!is.na(Season3$End[h]) && Season3$End[h] == "Spring") {
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+       Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Summer") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Fall") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+  else if (!is.na(Season3$Begin[h]) && Season3$Begin[h] == "Summer") {
+    if(!is.na(Season3$End[h]) && Season3$End[h] == "Summer") {
+    Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+        Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Fall") {
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+  else if (!is.na(Season3$Begin[h]) && Season3$Begin[h] == "Fall") {
+    if(!is.na(Season3$End[h]) && Season3$End[h] == "Fall") {
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season3$End[h]) && Season3$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+}
+for (h in 1:nrow(Farmers_Market)) {
+  if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Winter" && !is.na(Season4$End[h]) && Season4$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Winter" && !is.na(Season4$End[h]) && Season4$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Winter" && !is.na(Season4$End[h]) && Season4$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Winter" && !is.na(Season4$End[h]) && Season4$End[h] == "Fall") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Spring" && !is.na(Season4$End[h]) && Season4$End[h] == "Spring") {
+    Farmers_Market$Spring[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Spring" && !is.na(Season4$End[h]) && Season4$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+      Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Spring" && !is.na(Season4$End[h]) && Season4$End[h] == "Summer") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Spring" && !is.na(Season4$End[h]) && Season4$End[h] == "Fall") {
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Summer" && !is.na(Season4$End[h]) && Season4$End[h] == "Summer") {
+    Farmers_Market$Summer[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Summer" && !is.na(Season4$End[h]) && Season4$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Summer[h] <- "Available"
+       Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Summer" && !is.na(Season4$End[h]) && Season4$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+        Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Summer" && !is.na(Season4$End[h]) && Season4$End[h] == "Fall") {
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Fall" && !is.na(Season4$End[h]) && Season4$End[h] == "Fall") {
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Fall" && !is.na(Season4$End[h]) && Season4$End[h] == "Winter") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Fall" && !is.na(Season4$End[h]) && Season4$End[h] == "Spring") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+    else if (!is.na(Season4$Begin[h]) && Season4$Begin[h] == "Fall" && !is.na(Season4$End[h]) && Season4$End[h] == "Summer") {
+    Farmers_Market$Winter[h] <- "Available"
+    Farmers_Market$Spring[h] <- "Available"
+     Farmers_Market$Summer[h] <- "Available"
+     Farmers_Market$Fall[h] <- "Available"
+    }
+  }
+
+Farmers_Market$Winter 
+Farmers_Market$Spring 
+Farmers_Market$Summer
+Farmers_Market$Fall
+# creat halfyear and yearround columns indicating "No" which will be updated as per the criteria shown below
+Farmers_Market$HalfYear <- "No"  # update to yes If open for 1 to 3 seasons 
+Farmers_Market$YearRound <- "No" # update to yes If open for all 4 seasons
+
+for(j in 1:nrow(Farmers_Market)){
+  num_Seasons <- sum(str_count(Farmers_Market[j,],"Available"))
+  if (!is.na(num_Seasons) && num_Seasons == 4) {
+    Farmers_Market$YearRound[j] <- "Yes"
+  }
+  else if (!is.na(num_Seasons) && num_Seasons >= 1 && num_Seasons < 4){
+    Farmers_Market$HalfYear[j] <- "Yes"
+  }
+}
+Farmers_Market$YearRound
+Farmers_Market$HalfYear
+```
+4. (20 points) _Open question_: explore the new variables you just created. Aggregate them at different geographic levels, or some other categorical variable. What can you discover?
+```{r}
+ggplot(Farmers_Market, aes(x = x, y = y,fill = Winter)) + geom_polygon(color = "white") + theme_bw()
+ggplot(Farmers_Market, aes(x = x, y = y,fill = Spring)) + geom_polygon(color = "white") + theme_bw()
+ggplot(Farmers_Market, aes(x = x, y = y,fill = Summer)) + geom_polygon(color = "white") + theme_bw()
+ggplot(Farmers_Market, aes(x = x, y = y,fill = Fall)) + geom_polygon(color = "white") + theme_bw()
+
+```
+By Plotting all 4 seasons according to the longitude and latitude of the markets, we can see that during winter only the markets in the south, southwest and southeast regions are available, in spring markets in all the regions are available, in summer most of the markets available are located in the north,northeast and southeast regions whereas in fall markets in south, southwest, southeast and some markets in northeast are available.
+
+## Submission
+You need to submit an .Rmd extension file as well as the generated pdf file. Be sure to state all the assumptions and give explanations as comments in the .Rmd file wherever needed to help us assess your submission. Please name the submission file LAST_FirstInitial_1.Rmd for example for John Smith's 1st assignment, the file should be named Smith_J_1.Rmd. 
+
